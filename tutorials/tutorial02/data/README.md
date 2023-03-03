@@ -1,3 +1,0 @@
-## README
-
-Just a placeholder

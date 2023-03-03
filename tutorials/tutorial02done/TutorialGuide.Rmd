@@ -1,0 +1,50 @@
+---
+title: "Tutorial Guide, QTA Wk 2"
+author: "Martyn Egan"
+date: "2023-02-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Getting Started with Quanteda
+
+Today we will be looking at using the `Quanteda` package for the initial steps of the QTA workflow, from corpus acquisition through to the document-feature matrix. Quanteda contains a powerful set of functions for performing QTA, but we'll also need to use a couple of other packages to both import and wrangle our data.
+
+## Learning Outcomes
+
+By the end of today's tutorial we should be able to:
+
+1. Acquire a corpus using a web API
+2. Pre-process the corpus
+3. Create the document-feature matrix (dfm)
+
+## Case study: the Ukraine war
+
+No cricket this week, sadly. Instead, we're going to analyse the Guardian's coverage since the start of the year. Has coverage changed over that period? If so, how? As ever, we'll find that before we can answer the questions we have of our data, we'll be spending most of our effort trying to get it into the right shape to do so.
+
+## Using a web API
+
+Last week we looked at how to scrape text from static web pages using html and xpaths. Today we're going to take a step up and try acquiring text through a web API (Application Programming Interface). The API we will use is for [The Guardian](https://www.theguardian.com/) newspaper. Fun fact: The Guardian was originally called the Manchester Guardian, until it sold out and moved to London.
+
+### Step 1: Getting an API key
+
+The first step in acquiring our data is to get an API key. We'll need this to gain access to The Guardian's data. Click [here](https://bonobo.capi.gutools.co.uk/register/developer) and fill out the form.
+
+### Step 2: Getting the data
+
+The Guardian's API works by submitting a request to a web address. We can do this in a browser or with the help of a package. For today's class we'll use the helpful `guardianapi` package, which automates some of the process for us. Open your R script for today's class, `tutorial02.R` in the `code` repository.
+
+## Next time...
+
+Today's class took us through the heavy loading of acquiring and pre-processing our corpus. You *must* properly pre-process your corpus if you want your machine learning models to run in a reasonable time frame and produce meaningful results. As a rule of thumb, if the model for your problem set is taking longer than an hour or so, you didn't properly pre-process your corpus, and so your dfm is too large.
+
+Next week we'll revise this process and move on to looking at a few statistics regarding the corpus and the dfm.
+
+## Problem sets
+
+A final note: before completing the homeworks for this module please read the guide to using markdown in the top level of the repository. Your homework *must* be compiled as a html; if you submit an uncompiled `.Rmd` file your work will not be graded, as it will not contain any output. 
+
+Not being able to compile your `.Rmd` into a html is not an excuse for submitting an `.Rmd`: if it won't compile for you, it won't compile for me either.

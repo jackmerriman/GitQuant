@@ -28,11 +28,18 @@ lapply(c("tidyverse",
 ## 1. Read in and wrangle data
 #     a) In the data folder you'll find a large data.frame object called 
 #        ukr_h1_2022. Read it in, and check the type of articles it contains.
-dat <- 
+dat <- readRDS('data/ukr_h1_2022')
 
-#     b) Pre-process the data.frame.
 
-  
+dat$body_text <- str_replace(dat$body_text, "\u2022.+$", "")
+crp <- corpus(dat, docid_field = 'headline', text_field = 'body_text') 
+
+toks <- prep_toks(crp)
+colls <- get_coll(toks)
+toks <- tokens_compound(toks, pattern = colls[colls$z > 10,])
+toks <- tokens_remove(tokens(toks), "")
+
+dfm <- dfm(toks)
 dfm <- dfm_trim(dfm, min_docfreq = 20)
 
 ## 2. Perform STM 
@@ -58,7 +65,7 @@ modelFit <- stm(documents = stmdfm$documents,
 saveRDS(modelFit, "data/modelFit")
 
 # Load model (in case your computer is running slow...)
-#modelFit <- readRDS("data/modelFit")
+modelFit <- readRDS("data/modelFit")
 
 ## 3. Interpret Topic model 
 # Inspect most probable terms in each topic
@@ -143,7 +150,7 @@ SemExPlot <- ggplot(SemEx, aes(coh, ex)) +
   theme_minimal() +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
-        panel.background = element_rect(colour = "gray", linewidth=1))
+        panel.background = element_rect(colour = "gray"))
 SemExPlot
 
 # Inspect outliers
