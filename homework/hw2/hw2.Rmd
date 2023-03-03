@@ -1,0 +1,283 @@
+---
+title: 'POP77022: Programming Exercise 2'
+author: "Jack Merriman"
+date: "2023-03-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+The second homework assignment covers concepts and methods from Weeks 3 and 4 (Supervised and unsupervised text classification).  
+
+Please provide your answers as code and text in the RMarkdown file provided. When completed, first knit the file as an HTML file and then save the resulting HTML document in PDF format.  Upload the PDF to Turnitin.
+
+## Supervised text classification of Yelp reviews (50 points)
+
+We begin by analyzing a sample from the Zhang, Zhao & LeCun (2015) dataset of Yelp reviews which have been coded for sentiment polarity.  The authors of the dataset have created a `sentiment` variable where a value of 1 indicates a "negative" review (1 or 2 stars), and a 2 means a "positive" review (3 or 4 stars).
+
+First, bring in the reviews dataset from the `data` directory.  
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+setwd(getwd())
+
+#import necessary libraries
+pkgTest <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[,  "Package"])]
+  if (length(new.pkg)) 
+    install.packages(new.pkg,  dependencies = TRUE)
+  sapply(pkg,  require, warn.conflicts=F, quietly=T, character.only = TRUE)
+}
+
+lapply(c("tidyverse", "quanteda", "quanteda", "quanteda.textstats",
+         "quanteda.textplots", "readtext", "stringi", "textstem", "lubridate",
+         "caret", "MLmetrics", "doParallel"), pkgTest)
+
+#Read in the data
+data <- read.csv("./data/yelp_data_small.csv", 
+                 stringsAsFactors=FALSE,
+                 encoding = "utf-8")
+```
+
+1.  Create a `quanteda` corpus object from this matrix and inspect its attributes.  
+    + What is the overall probability of the "positive" class in the corpus?  Are the classes balanced? (Hint: Use the `table()` function)
+
+```{r}
+#Replace the return character "\n" with a whitespace
+data$text <- gsub("\\\\n", " ", data$text)
+#Replace the resulting double whitespaces with singles
+data$text <- gsub("  ", " ", data$text)
+#check for duplicates (there are none)
+which(duplicated(data$text))
+#no natural ID field supplied so just specify the text column
+corp <- corpus(data, text_field = 'text')
+
+#Create a summary object to view the corpus attributes
+corpSum <- summary(corp, n = nrow(docvars(corp)))
+head(corpSum)
+
+#Print proportions of positive and negative tokens vs reviews
+table(data$sentiment)/10000
+paste("Proportion of Positive Tokens:",
+      sum(corpSum[corpSum$sentiment=='pos',]$Tokens)/sum(corpSum$Tokens))
+paste("Proportion of Negative Tokens:",
+      sum(corpSum[corpSum$sentiment=='neg',]$Tokens)/sum(corpSum$Tokens))
+```
+
+```
+We can see that the proportion of positive and negative reviews is very similar, but some difficulty may come from comparing the two as there is a much higher proportion of negative tokens than positive. This points to negative reviews being wordier than the positive reviews.
+```
+
+2.  Create a document-feature matrix using this corpus.  Process the text so as to increase predictive power of the features. Justify each of your processing decisions in the context of the supervised classification task.
+
+```{r}
+
+
+#text processing
+toks <- quanteda::tokens(corp, 
+                         include_docvars = TRUE,
+                         remove_numbers = TRUE,
+                         remove_punct = TRUE,
+                         remove_symbols = TRUE,
+                         remove_separators = TRUE,
+                         remove_url = TRUE) %>%
+  tokens_tolower() %>%
+  tokens_remove(stopwords("english"))
+
+#collocations, run this process twice to get 3 word collocations too
+#z score of 3.09 set to reflect a critical threshold of p < 0.001
+clcs <- textstat_collocations(toks, size = 3, min_count = 20)['z' > 3.09,]
+toks <- tokens_compound(toks, clcs)
+clcs <- textstat_collocations(toks, size = 2, min_count = 20)['z' > 3.09,]
+toks <- tokens_compound(toks, clcs)
+#Remove whitespaces
+toks <- tokens_remove(quanteda::tokens(toks), "") 
+#Lemmatise the tokens; I prefer lemmatisation over stemming to increase the data set legibility and to preserve context
+toks <- as.tokens(lapply(as.list(toks), lemmatize_words))
+
+#Create a preliminary dfm
+dfmTest <- dfm(toks)
+#Use preliminary dfm to find other stopwords and recycle code to create the final dfm
+topfeatures(dfmTest, n=50)
+
+new_stopwords <- (c('get','just','say','even','tell','us','can','call','use'))
+toks <- tokens_remove(quanteda::tokens(toks), new_stopwords)
+#create main dfm and add sentiment
+dfm <- dfm(toks)
+dfm$sentiment <- data$sentiment
+#trim the dfm to decrease processing time
+dfm <- dfm_trim(dfm, min_docfreq = 40)
+#weight the dfm using tf-idf to improve predictive power
+dfm <- dfm_tfidf(dfm)
+
+```
+
+3.  Now that you have your document-feature matrix, use the `caret` library to create a training set and testing set following an 80/20 split.
+
+```{r}
+#Convert the dfm into a data-frame to be used for machine learning
+mlDat <- convert(dfm, to = "data.frame", docvars = NULL)[,-1]
+#Label the sentiment to add to data frame
+sntmntLabels <- dfm@docvars$sentiment
+mlDat <- as.data.frame(cbind(sntmntLabels, mlDat))
+#set seed for replicability
+set.seed(2023)
+#randomly reorder the documents
+mlDat <- mlDat[sample(nrow(mlDat)), ]
+#bound the validation set of 5%
+valDat <- mlDat[1:round(nrow(mlDat) * 0.05),]
+#the labelled data less the validation set
+mainDat <- mlDat[(nrow(valDat)+1):nrow(mlDat),]
+
+# create the specified split
+partition <- createDataPartition(mainDat$sntmntLabels, p=0.8, list=FALSE)
+Train <- mainDat[partition, ]
+Test <- mainDat[-partition, ]
+# create a control for the training data
+ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 3,
+  classProbs= TRUE, summaryFunction = multiClassSummary,
+  selectionFunction = "best", verboseIter = TRUE)
+```
+
+4.  Using these datasets, train a naive Bayes classifier with the `caret` library to predict review sentiment.  Explain each step you take in the learning pipeline. Be sure to:
+    + Evaluate the performance of the model in terms of classification accuracy of predictions in the testing set. Include a discussion of precision, recall and F1.
+    + Explain in detail what steps were taken to help avoid overfitting.
+    + Describe your parameter tuning.
+    + Discuss the most predictive features of the dataset. (*Hint: use `kwic` to provide a qualitative context)
+
+```{r}
+
+```
+
+5. Provide a similar analysis using a Support Vector Machine.  However, irrespective of your settings for Question 4, for this excercise use a 5-fold cross-validation when training the model.  Be sure to explain all steps involved as well as an evaluation of model performance.  Which model is better, NB or SVM?  Explain in detail.
+
+```{r}
+
+```
+
+## Topic Modeling Breitbart News (50 points)
+
+In this section, we will analyze the thematic structure of a corpus of news articles from Breitbart News, a right-wing American news outlet. Employ a Structural Topic Model from the `stm` library to investigate the themes found within this corpus.
+
+First, bring in a sample of Breitbart articles from 2016 (n=5000):
+
+```{r}
+setwd(getwd())
+data <- read.csv("./data/breitbart_2016_sample.csv", 
+                 stringsAsFactors=FALSE,
+                 encoding = "utf-8")
+```
+
+1. Process the text and generate a document-feature matrix.  Be sure to remove unhelpful characters and tokens from the DFM and to also retain the original text for model validation.  Remove tokens that occur in less than 20 documents.  Justify your feature selection decisions.
+
+```{r}
+
+#Remove all of Breitbart's LiveWire blogs as the formatting renders they are mostly embedded Tweets
+bbData <- bbData[-grep('LiveWire', bbData$title),]
+bbCorp <- corpus(bbData, text_field = 'content', docid_field = 'title')
+
+
+
+bbToks <- quanteda::tokens(bbCorp, 
+                         include_docvars = TRUE,
+                         remove_numbers = TRUE,
+                         remove_punct = TRUE,
+                         remove_symbols = TRUE,
+                         remove_separators = TRUE,
+                         remove_url = TRUE) %>%
+  tokens_tolower() %>%
+  tokens_remove(stopwords("english"))
+
+#collocations
+bbClcs <- textstat_collocations(bbToks, size = 3, min_count = 20)['z' > 3.09,]
+toks <- tokens_compound(bbToks, bbClcs)
+bbClcs <- textstat_collocations(bbToks, size = 2, min_count = 20)['z' > 3.09,]
+toks <- tokens_compound(bbToks, bbClcs)
+#Remove whitespaces
+bbToks <- tokens_remove(quanteda::tokens(bbToks), "") 
+#Lemmatise the tokens
+bbToks <- as.tokens(lapply(as.list(bbToks), lemmatize_words))
+
+#Create a preliminary dfm
+bbDfmTest <- dfm(bbToks)
+#Use preliminary dfm to find other stopwords and recycle code to create the final dfm
+topfeatures(bbDfmTest, n=50)
+
+bb_stopwords <- (c('also','just','year','one','tell','two','can','call','get'))
+bbToks <- tokens_remove(quanteda::tokens(bbToks), bb_stopwords)
+#create main dfm and add dates
+bbDfm <- dfm(bbToks)
+bbDfm$date <- bbData$date
+
+#trim the dfm in line with the question requirments
+bbDfm <- dfm_trim(bbDfm, min_docfreq = 20)
+
+```
+
+2.  Convert the DFM into STM format and fit an STM model with `k=35` topics.  
+
+```{r}
+
+```
+
+3.  Interpret the topics generated by the STM model.  Discuss the prevalence and top terms of each topic.  Provide a list of the labels you have associated with each estimated topic.  For each topic, justify your labelling decision. (Hint: You will want to cite excerpts from typical tweets of a given topic.  Also, use the date variable to inform estimates of topic prevalence.).  
+
+```{r}
+
+```
+
+```
+Topic 1  | Gun Rights
+Example: "Phelps mentioned his concern over "shootings" too, but he did not point out that nearly every firearm-based mass public attack on record occurred in a gun-free zone -- the kind of zone created by people who oppose allowing concealed carry on campus for self-defense."
+
+Topic 2  | Spanish Language
+This topic is by far the least prevalent, and contains mostly Spanish language stopwords. Not many conclusions can be derived but a frequent feature in this topic is 'cartel' which implies that Breitbart's articles featuring Spanish language are often about drug trafficking and violence.
+
+Topic 3  | Climate Change
+Topic 4  | Veterans
+Topic 5  | China
+Topic 6  | Sport
+Topic 7  | Narcotics
+Topic 8  | Technology
+Topic 9  | Religion
+Topic 10 | Arts
+Topic 11 | Feminism
+Topic 12 | Justice
+Topic 13 | Cybersecurity
+Topic 14 | Law Enforcement
+Topic 15 | Financial Markets
+Topic 16 | Immigration
+Topic 17 | The Democratic Party
+Topic 18 | Social Media
+Topic 19 | Opinion Polling
+TOpic 20 | Nuclear Proliferation
+Topic 21 | Podesta e-mail Scandal
+Topic 22 | Terrorism
+TOpic 23 | Race Relations
+Topic 24 | Republican Presidential Primaries
+Topic 25 | Public Health
+Topic 26 | Brexit
+Topic 27 | Supreme Court Vacancy
+Topic 28 | California
+Topic 29 | Syrian Civil War
+Topic 30 | Automotives
+Topic 31 | Israel-Palestine Conflict
+Topic 32 | Education
+Topic 33 | Thinkpieces
+Topic 34 | European Refugee Crisis
+Topic 35 | Sexual Assault
+
+
+
+```
+
+4.  Topic model validation.  Demonstrate and interpret the semantic and predictive validity of the model.  Also discuss the quality of topics in terms of semantic coherence and top exclusivity.  Discuss how you would show construct validity.
+
+```{r}
+
+```
+
+5.  What insights can be gleaned about right-wing media coverage of the 2016 US election?  What election-related topics were derived from the model?  What interesting temporal patterns exist?  Why might the prevalence of certain important topics vary over 2016?  Provide evidence in support of your answers.

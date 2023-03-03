@@ -1,0 +1,315 @@
+---
+title: 'POP77022: Programming Exercise 1'
+author: "Jack Merriman"
+date: "2023-02-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+The first homework assignment will cover concepts and methods from Weeks 1 & 2 (basic string operations, corpus acquisition, text processing, textual statistics, dictionary methods).  You are expected to provide your answers as embedded R code and/or text answers in the chunks provided in the homework RMarkdown file. 
+
+For example:
+
+```{r}
+print("Print R code in code chunk.")
+```
+
+```
+Describe results and provide answers to conceptual and open-ended questions
+in a plain code block like this one.
+```
+
+__The programming exercise is worth 20% of your total grade.  The questions sum to 100 points.__
+
+## Analysis of tweets during a political crisis
+
+We will start with a dataset that contains almost 900 tweets that were published by four central figures in American politics around the time of the onset of an impeachment inquiry: Pres. Donald Trump, Rudy Giuliani, Speaker of the House Rep. Nancy Pelosi, and Chair of the House Intelligence Committee Rep. Adam Schiff.  
+
+The first step will be to read the spreadsheet of tweets into R and then use the `str` and `head` functions to describe the variables and contents of the dataset.  For your convenience, I will provide code to import the spreadsheet (*Hint: be sure that the data folder is in the same folder as this homework RMarkdown file.*)
+
+```{r}
+setwd(getwd())
+data <- read.csv("./data/us_tweets.csv", 
+                 stringsAsFactors=FALSE,
+                 encoding = "utf-8")
+```
+
+### Question 1.0 (2 points)
+
+Print the number of tweets that are in this dataset.
+
+```{r}
+# Length of a column is number of observations
+print(paste('Number of tweets:',length(data[[1]])))
+```
+
+
+### Question 1.1 (3 points)
+
+Create a new dataframe that only includes original tweets (remove retweets) and print the number of rows.
+
+```{r}
+# tidyverse allows easier manipulation of the data frame
+library(tidyverse)
+data2 <- data %>%
+  # subset observations that are not retweers and add them to a new data frame
+  filter(is_retweet == FALSE)
+
+# nrow another way of doing what was done in Q1.0
+print(paste("Number of original tweets:",nrow(data2)))
+
+```
+
+### Question 1.2 (20 points)
+
+Create a smaller dataframe that only includes tweets by Donald Trump.
+
+* Print how many tweets by Trump are contained in the dataset?
+
+For the following print the number of instances as well as an example tweet:
+
+* How many tweets include an exclamation mark?  
+* In how many tweets did Trump mention words related to "winning"?
+* "employment"?
+* "immigration"?
+* "hoax"?
+
+Make sure that you support your answers with code.
+
+(*Hints: be sure to use regular expressions when searching the tweets; also you might want to wrap your search term in between word anchor boundaries (`\\b`).  For instance, for the term health: `"\\bhealth\\b"`*)
+
+```{r}
+trump <- data2 %>%
+   # Use Trump's twitter handle to filter his tweets
+  filter(screen_name == 'realDonaldTrump')
+print(paste("Number of original tweets by Donald Trump:", nrow(trump)))
+
+# grep returns a list of indexes of tweets containing an exclamation mark
+# the length of the list is the number of tweets containing one
+print(paste("Trump tweets with '!':", length(grep('\\!',trump$text))))
+# use the indexes provided by the grep function to subset the tweets, then
+# index the list of tweets provided to produce an example
+trump$text[grep('\\!', trump$text)[1]]
+
+print(paste("Trump tweets about 'winning':",
+            # only  use word anchor boundaries for 'win' as the other terms
+            # are unlikely to be part of unrelated words
+            length(grep('winning|\\bwin\\b|winner',
+                         trump$text, ignore.case = TRUE))))
+trump$text[grep('winning|\\bwin\\b|winner',
+                trump$text, ignore.case = TRUE)[1]]
+
+print(paste("Trump tweets about employment:",
+            # 'job' is context dependent but 'jobs' is usually used in
+            # macroeconomic contexts
+            length(grep('employ|\\bjobs\\b',
+                        trump$text, ignore.case = TRUE))))
+trump$text[grep('employ|\\bjobs\\b',
+                trump$text, ignore.case = TRUE)[1]]
+
+print(paste("Trump tweets about immigration:",
+            #second term will capture migration, immigration and emigration
+            #fourth term will capture Mexico, Mexican and Mexicans
+            length(grep('border|migrat|migrant|mexic|\\bwall\\b',
+                        trump$text, ignore.case = TRUE))))
+trump$text[grep('border|migrat|migrant|mexic|\\bwall\\b',
+                        trump$text, ignore.case = TRUE)[1]]
+
+print(paste("Trump tweets about hoaxes:",
+            length(grep('fake news|hoax',
+                        trump$text, ignore.case = TRUE))))
+trump$text[grep('fake news|hoax',
+                trump$text, ignore.case = TRUE)[1]]
+
+
+
+```
+
+
+### Question 2 (75 points)
+
+Create a `corpus` and a `dfm` object with processed text (including collocations) using the dataframe generated in Question 1.1.  With the generated `dfm` object perform the following tasks:
+
+1. Create a frequency plot of the top 30 tokens for each politician.
+1. Determine the "key" terms that Trump and Pelosi are more likely to tweet.  Plot your results
+1. Perform a keyword in context analysis using your `corpus` object for some of the most distinct keywords from both Trump and Pelosi. *Hint: remember to use the `phrase` function in the `pattern` argument of `kwic`*
+1. Conduct a sentiment analysis of Trump's tweets using the Lexicon Sentiment Dictionary.  Plot net sentiment over the entire sample period. Interpret the results.  *Hint: you might want to use `lubridate` to generate a date object variable from the "created_at" variable before plotting.  For example: `docvars(dfm, "date") <- lubridate::ymd_hms(dfm@docvars$created_at)` *
+1. Justify each of your text processing decisions and interpret your results in the text field below. What can we learn about the political communication surrounding the political crisis based on the results from the above tasks?
+
+```{r}
+#Question 2
+library(quanteda)
+library(quanteda.textstats) #collocations
+library(quanteda.textplots) #Plots
+library(textstem) #lemmatisation
+library(lubridate)
+
+#reset data2 variable for ease of re-running the chunk
+data2 <- data %>% filter(is_retweet == FALSE)
+
+#Remove picture tweets and tweets that are only links
+#regex here finds tweets that begin with http/https and have no white-spaces
+data2 <- data2[-grep('^https?\\S*$', data2$text),]
+#remove columns not relevant to text analysis
+data2 <- data2 %>%
+  select(X, screen_name, text, created_at) %>%
+  #format date
+  mutate(created_at = as_datetime(created_at))
+#create corpus and summary
+crps <- corpus(data2, docid_field = 'X', text_field = 'text')
+csum <- summary(crps, n = nrow(docvars(crps)))
+
+#text processing
+tkns <- quanteda::tokens(crps, 
+                         include_docvars = TRUE,
+                         remove_numbers = TRUE,
+                         remove_punct = TRUE,
+                         remove_symbols = TRUE,
+                         remove_separators = TRUE,
+                         remove_url = TRUE) %>%
+  tokens_tolower() %>%
+  tokens_remove(stopwords("english"))
+#collocations
+clcs <- textstat_collocations(tkns, size = 2, min_count = 10) 
+#All have high Z scores and appear contextually relevant, so will be left in
+tkns <- tokens_compound(tkns, clcs)
+#Remove whitespaces
+tkns <- tokens_remove(quanteda::tokens(tkns), "") 
+#Lemmatise the tokens
+tkns <- as.tokens(lapply(as.list(tkns), lemmatize_words))
+
+#Create a preliminary dfm
+dfmTest <- dfm(tkns)
+#Use preliminary dfm to find other stopwords and recycle code to create the final dfm
+topfeatures(dfmTest, n=50)
+extra_stopwords <- c('say', 'get', 'know', 'see', 'just', 'go', 'one', 'can', 'want', 'do', 'come')
+tkns <- quanteda::tokens(crps, 
+                         include_docvars = TRUE,
+                         remove_numbers = TRUE,
+                         remove_punct = TRUE,
+                         remove_symbols = TRUE,
+                         remove_separators = TRUE,
+                         remove_url = TRUE) %>%
+  tokens_tolower() %>%
+  tokens_remove(c(stopwords("english"), extra_stopwords))
+tkns <- tokens_compound(tkns, clcs)
+tkns <- tokens_remove(quanteda::tokens(tkns), "")
+tkns <- as.tokens(lapply(as.list(tkns), lemmatize_words))
+dfmTwt <- dfm(tkns)
+
+#add in relevant docvars for analysis of the dfm
+dfmTwt$author <- data2$screen_name
+dfmTwt$date <- data2$created_at
+
+
+#Question 2.1
+#Assign frequency to objects to be plotted
+frqT <- textstat_frequency(dfm_subset(dfmTwt, dfmTwt$author == 'realDonaldTrump'), n = 30)
+frqP <- textstat_frequency(dfm_subset(dfmTwt, dfmTwt$author == 'SpeakerPelosi'), n = 30)
+frqG <- textstat_frequency(dfm_subset(dfmTwt, dfmTwt$author == 'RudyGiuliani'), n = 30)
+frqS <- textstat_frequency(dfm_subset(dfmTwt, dfmTwt$author == 'RepAdamSchiff'), n = 30)
+
+#Create plots
+frqT %>%
+  ggplot(aes(x = reorder(feature, frequency), y = frequency)) +
+  geom_point() +
+  coord_flip() +
+  labs(x = "Donald Trump features")
+frqP %>%
+  ggplot(aes(x = reorder(feature, frequency), y = frequency)) +
+  geom_point() +
+  coord_flip() +
+  labs(x = "Nancy Pelosi features")
+frqG %>%
+  ggplot(aes(x = reorder(feature, frequency), y = frequency)) +
+  geom_point() +
+  coord_flip() +
+  labs(x = "Rudy Giuliani features")
+frqS %>%
+  ggplot(aes(x = reorder(feature, frequency), y = frequency)) +
+  geom_point() +
+  coord_flip() +
+  labs(x = "Adam Schiff features")
+
+#Question 2.2
+#Create a subsetted dfm containing only features from Trump and Pelosi tweets
+sbst <- dfm_subset(dfmTwt,dfmTwt$author == 'realDonaldTrump'|dfmTwt$author == 'SpeakerPelosi')
+#Group by author for the relative keyness plot
+dfmGroups <- dfm_group(sbst,fill = TRUE, groups = sbst$author)
+#Find the keyness and then plot it
+key <- textstat_keyness(dfmGroups, target = 'realDonaldTrump')
+textplot_keyness(key, color = c('red','blue'), labelsize = 3)
+
+#Question 2.3
+#Use the top two keywords in our analysis and find ten examples by subsetting the kwic call
+kwic(crps[data2$screen_name=='realDonaldTrump'], phrase(c('great', 'democrat')), valuetype = 'glob')[1:10]
+kwic(crps[data2$screen_name=='SpeakerPelosi'], phrase(c('tune', '@realdonaldtrump')), valuetype = 'glob')[1:10]
+
+#Question 2.4
+#Create a dfm of just Trump tweets to tidy code
+dfmTrump <- dfm_subset(dfmTwt,dfmTwt$author == 'realDonaldTrump')
+#Compile sentiment, only the first two terms from LSD to make an easy net sentiment analysis, then group by date
+sntmnt <- dfm_lookup(dfmTrump, data_dictionary_LSD2015[1:2]) %>% dfm_group(groups = date)
+#Calculate proportional positive and negative sentiment by date, then subtract the latter from the former to calculate net sentiment
+docvars(sntmnt, "prop_negative") <- as.numeric(sntmnt[,1] / ntoken(sntmnt))
+docvars(sntmnt, "prop_positive") <- as.numeric(sntmnt[,2] / ntoken(sntmnt))
+docvars(sntmnt, "net_sentiment") <- docvars(sntmnt, "prop_positive") -docvars(sntmnt,"prop_negative")
+#Plot the sentiment to guide our analysis
+docvars(sntmnt) %>%
+  ggplot(aes(x = date, y = net_sentiment, group = year(date))) +
+  geom_smooth(aes(color='red')) +
+  labs(title = "Sentiment of Donald Trump's tweets over time",
+       x = "day of year", y = "net sentiment", colour = "year")
+
+
+
+```
+
+```
+#Question 2.3
+
+Trump's frequent use of Democrat appears from the KWIC analysis to be used to portray the impeachment inquiry as a political ploy against him by an onimous large force, and he implies they are all controlling and corrupt too, painting the scandal as a 'Democrat Scam'.
+
+Pelosi actively tags Trump in negative tweets about the scandal and uses mayn hashtags, perhaps to try and boost engagement within the Twitter algorithm, which Trump doesn't have to do due to his ubiquity on the site. The use of 'tune' is important as it shows she uses the platform as a call to action in order to have followers view her speeches.
+
+#Question 2.4
+
+Trump's sentiment was largely positive at the very start of the data-set, in the run-up to important gubernatorial elections taking place in November. The start of the data-set aligns with the whistleblower complaint about Trump's phone call with Zelenskyy becoming public knowledge, and a sharp decline in the net-sentiment of his tweets ensues.
+
+The second key event is the announcement of the House impeachment inquiry on the 24th of September. While the sentiment holds for about a week it sharply declines into net-negative after that.
+
+The Democratic Party being a key feature of Trump's tweets combined with the decline suggests that Trump's response was to deflect and criticise his political opponents in response to the onset of the political crisis.
+
+#Question 2.5
+
+#Processing Decisions
+
+I began by using regex to remove tweets from the dataset that began with 'http' and contained no whitespaces, as I knew those tweets were purely URLs referencing an uncaptioned image and irrelevant to text analysis.
+
+I only kept the screen_name and created_on columns as they were relevant to the questions asked.
+
+A viewing of collocations showed that all of them appeared contextually relevant to me, and had quite high Z scores. Even something like 'york times' is likely to be a reference to the NYT which is relevant to Trump's criticism of the media. That's why I chose not to omit any.
+
+I opted to lemmatise the tokens rather than stemming them as it allows for better presentation of data by keeping words intact, and preserves context too.
+
+I created a test DFM to show top features where I could find and omit more tokens that were stopwords in this context not removed by the basic stopword list. This was to reduce noise in the analysis and really focus on relevant features.
+
+#Analysis
+
+Analysis of Trump's sentiment shows that political communication in a crisis can grow increasingly hostile and can be reduced to finger-pointing. Pelosi and Schiff focused their attacks on Trump following the revelations about communications with Ukraine, sensing political gains to be made, and Trump rather than addressing scandal directly chose to attack his attackers.
+
+Features like 'hoax' and 'witch-hunt' appearing prominently in the keyness plot show that Trump aimed to paint the scandal as politically motivated and overblown if not false. The fact that Trump  Pelosi's key hashtags mostly alluded to the truth (#truthexposed), and a desire to expose more of the scandal to the public.
+
+Both Schiff and Giuliani had 'whistleblower' appear prominently in their frequency of the plot, Schiff as the leader of the committee wished to emphasise the accusations, while Giuliani as a proxy for Trump attacked the credibility of the whistleblower and the process itself in order to delegitimise the grievances posed by Democrats.
+
+
+```
+
+
+
+

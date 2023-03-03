@@ -220,8 +220,10 @@ dfm_ukr <- rbind(dfm22, dfm23)
 # This allows us to analyse and compare keyness across years
 set.seed(2023)
 dfm_by_date <- dfm_group(dfm_ukr, fill = TRUE, groups = year(dfm_ukr$date))
-keyness <- textstat_keyness(dfm_by_date, target = "2022")
-textplot_keyness(keyness, labelsize = 3)
+keyness <- textstat_keyness(dfm_by_date, target = "2022")+
+  xlim(-30,75)
+textplot_keyness(keyness, labelsize = 3)+
+  xlim(-30,75)
 
 # Finally, let's see if sentiment analysis can detect a change in tone 
 # over time. To do this, we need to use a dictionary object. We only
